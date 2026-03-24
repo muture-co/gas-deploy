@@ -147,16 +147,46 @@ GSEOF
 }
 
 cmd_list() {
-  [ ! -f "$CONFIG_FILE" ] && { info "No apps. Run: gas-deploy init"; exit 0; }
-  echo -e "${BLUE}gas-deploy${NC} apps:\n"
+  local check=false
+  [ "${1:-}" = "--check" ] && check=true
+  [ ! -f "$CONFIG_FILE" ] && { info "登録済みアプリなし。gas-deploy init で追加"; exit 0; }
+
+  if $check; then
+    echo -e "${BLUE}gas-deploy${NC} アプリ一覧（ヘルスチェック中...）\n"
+  else
+    echo -e "${BLUE}gas-deploy${NC} アプリ一覧\n"
+  fi
+
   python3 -c "
-import json
+import json, subprocess, sys
+check = $([[ $check == true ]] && echo 'True' || echo 'False')
 with open('$CONFIG_FILE') as f:
     data = json.load(f)
 for name, app in data.get('apps', {}).items():
-    print(f'  {name}')
-    print(f'    Title: {app.get(\"title\",\"\")}')
-    print(f'    URL:   https://script.google.com/macros/s/{app.get(\"deploy_id\",\"\")}/exec')
+    url = f'https://script.google.com/macros/s/{app.get(\"deploy_id\",\"\")}/exec'
+    access = app.get('access', 'DOMAIN')
+    access_label = '組織内' if access == 'DOMAIN' else '一般公開'
+    status = ''
+    if check:
+        try:
+            r = subprocess.run(['curl', '-sI', '-o', '/dev/null', '-w', '%{http_code}', '-m', '5', url],
+                               capture_output=True, text=True, timeout=10)
+            code = r.stdout.strip()
+            if code in ('200', '302'):
+                status = '\033[0;32m● 稼働中\033[0m'
+            elif code == '403':
+                status = '\033[0;33m● 要認証\033[0m'
+            else:
+                status = f'\033[0;31m● エラー ({code})\033[0m'
+        except:
+            status = '\033[0;31m● 接続失敗\033[0m'
+
+    print(f'  {app.get(\"title\", name)}')
+    print(f'    ファイル:  {name}')
+    print(f'    アクセス:  {access_label}')
+    print(f'    URL:       {url}')
+    if status:
+        print(f'    ステータス: {status}')
     print()
 "
 }
@@ -173,7 +203,7 @@ cmd_open() {
 case "${1:-}" in
   init)  shift; cmd_init "$@" ;;
   push)  shift; cmd_push "$@" ;;
-  list)  cmd_list ;;
+  list)  shift; cmd_list "$@" ;;
   open)  shift; cmd_open "$@" ;;
   -v|--version) echo "gas-deploy v${VERSION}" ;;
   *)
@@ -182,6 +212,7 @@ case "${1:-}" in
     echo "  gas-deploy init <html> --title \"タイトル\"   初期化＋初回デプロイ"
     echo "  gas-deploy push <html>                       更新（URL固定）"
     echo "  gas-deploy list                              登録済みアプリ一覧"
+    echo "  gas-deploy list --check                      一覧＋ヘルスチェック"
     echo "  gas-deploy open <html>                       ブラウザで開く"
     ;;
 esac

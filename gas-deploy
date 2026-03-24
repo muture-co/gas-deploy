@@ -2,7 +2,7 @@
 # gas-deploy: Deploy any HTML file to Google Apps Script as a web app
 set -e
 
-VERSION="1.0.0"
+VERSION="1.1.0"
 CONFIG_FILE="$(pwd)/.gas-deploy.json"
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'; BLUE='\033[0;34m'; NC='\033[0m'
@@ -91,7 +91,24 @@ data['apps']['$html_file'] = {'script_id':'$script_id','deploy_id':'$deploy_id',
 json.dump(data, open(f,'w'), ensure_ascii=False, indent=2)
 "
   ok "Saved to .gas-deploy.json"
-  echo -e "\n${GREEN}Done!${NC} URL: ${BLUE}https://script.google.com/macros/s/${deploy_id}/exec${NC}\n"
+
+  local url="https://script.google.com/macros/s/${deploy_id}/exec"
+  local editor="https://script.google.com/d/${script_id}/edit"
+  echo ""
+  echo -e "${GREEN}デプロイ完了${NC}"
+  echo ""
+  echo -e "  URL:        ${BLUE}${url}${NC}"
+  echo -e "  エディタ:   ${BLUE}${editor}${NC}"
+  echo ""
+  if [ "$access" = "DOMAIN" ]; then
+    echo -e "${YELLOW}次のステップ: 権限設定${NC}"
+    echo "  初回デプロイ後、Apps Scriptエディタで権限を設定してください:"
+    echo "  1. 上記エディタURLを開く"
+    echo "  2. 「デプロイ」→「デプロイを管理」"
+    echo "  3. 編集（鉛筆アイコン）→「アクセスできるユーザー」を確認"
+    echo "  4.「次のユーザーとして実行」→「自分」を選択"
+    echo ""
+  fi
 }
 
 cmd_push() {
@@ -125,7 +142,8 @@ GSEOF
   info "Deploying..."
   clasp deploy --deploymentId "$deploy_id" --description "auto $(date +%Y%m%d-%H%M)" 2>&1 | head -3
   cd - > /dev/null
-  ok "→ https://script.google.com/macros/s/${deploy_id}/exec"
+  echo ""
+  ok "更新完了 → ${BLUE}https://script.google.com/macros/s/${deploy_id}/exec${NC}"
 }
 
 cmd_list() {
@@ -159,11 +177,11 @@ case "${1:-}" in
   open)  shift; cmd_open "$@" ;;
   -v|--version) echo "gas-deploy v${VERSION}" ;;
   *)
-    echo "gas-deploy v${VERSION} — Deploy HTML to Google Apps Script"
+    echo "gas-deploy v${VERSION} — HTMLをApps ScriptのWebアプリとしてデプロイ"
     echo ""
-    echo "  gas-deploy init <html> --title \"Title\" [--access DOMAIN|ANYONE_ANONYMOUS]"
-    echo "  gas-deploy push <html>"
-    echo "  gas-deploy list"
-    echo "  gas-deploy open <html>"
+    echo "  gas-deploy init <html> --title \"タイトル\"   初期化＋初回デプロイ"
+    echo "  gas-deploy push <html>                       更新（URL固定）"
+    echo "  gas-deploy list                              登録済みアプリ一覧"
+    echo "  gas-deploy open <html>                       ブラウザで開く"
     ;;
 esac

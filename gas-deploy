@@ -23,10 +23,18 @@ check_env() {
 get_app_config() {
   local html_file="$1"
   python3 -c "
-import json, sys
+import json, sys, os
 with open('$CONFIG_FILE') as f:
     data = json.load(f)
-app = data.get('apps', {}).get('$html_file')
+apps = data.get('apps', {})
+# Try exact match first, then resolve to relative path
+key = '$html_file'
+app = apps.get(key)
+if not app:
+    try:
+        rel = os.path.relpath(key)
+        app = apps.get(rel)
+    except: pass
 if not app: sys.exit(1)
 for k, v in app.items():
     print(f\"{k}='{v}'\")

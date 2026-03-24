@@ -1,45 +1,61 @@
 # gas-deploy
 
-Deploy any HTML file to Google Apps Script as a web app — in one command.
+HTMLファイルをGoogle Apps ScriptのWebアプリとしてデプロイするCLIツール。
 
-## What is this?
+## 何ができるか
 
-`gas-deploy` wraps Google's [clasp](https://github.com/google/clasp) CLI to provide a simple two-step workflow:
+[clasp](https://github.com/google/clasp) をラップし、2ステップのシンプルなワークフローを提供する:
 
-1. `gas-deploy init my-app.html` → Creates an Apps Script project, deploys your HTML as a web app, gives you a URL
-2. `gas-deploy push my-app.html` → Updates the deployed web app with your latest HTML
+1. `gas-deploy init my-app.html` — Apps Scriptプロジェクトを作成し、Webアプリとしてデプロイ。固定URLを発行
+2. `gas-deploy push my-app.html` — 同じURLのまま、最新のHTMLでWebアプリを更新
 
-No need to touch the Apps Script editor. No need to manage deployment IDs. Just push HTML and get a URL.
+Apps Scriptエディタを開く必要なし。デプロイIDの管理も不要。HTMLをpushするだけ。
 
-## Prerequisites
+### URL固定化
 
-- **macOS or Linux** (Windows WSL should also work)
-- **Node.js** (auto-installed via Homebrew if missing on macOS)
-- **Google account** with Apps Script API enabled
+claspの `clasp deploy` を引数なしで実行すると、毎回新しいデプロイIDとURLが生成される。
+`gas-deploy` は初回 `init` 時にデプロイIDを `.gas-deploy.json` に保存し、以降の `push` では常に同じデプロイIDを更新するため、**URLが変わらない**。
 
-## Quick Start
+共有済みのURLがそのまま使い続けられる。
+
+## 前提条件
+
+- **macOS または Linux**（Windows WSLも可）
+- **Node.js**（macOSではHomebrewで自動インストール）
+- **Googleアカウント**（Apps Script APIが有効であること）
+
+## セットアップ
 
 ```bash
-# Install
+# インストール
 git clone https://github.com/muture-co/gas-deploy.git ~/source/gas-deploy
 mkdir -p ~/bin && ln -s ~/source/gas-deploy/gas-deploy ~/bin/gas-deploy
 
-# Make sure ~/bin is in your PATH (add to .zshrc if not already there)
-export PATH="$HOME/bin:$PATH"
-
-# Initialize (first time only — creates project + deploys)
-gas-deploy init my-dashboard.html --title "My Dashboard"
-
-# Update (anytime you change the HTML)
-gas-deploy push my-dashboard.html
+# ~/bin にPATHを通す（.zshrcに未設定の場合）
+echo 'export PATH="$HOME/bin:$PATH"' >> ~/.zshrc && source ~/.zshrc
 ```
 
-On first run, `gas-deploy` will:
-- Install `clasp` if not found
-- Open a browser for Google OAuth login
-- Guide you to enable the Apps Script API if needed
+初回実行時に以下を自動で行う:
+- `clasp` が未インストールなら `npm install -g @google/clasp`
+- Google OAuthログインをブラウザで開く
 
-## How it works
+## 使い方
+
+```bash
+# 初期化（初回のみ — プロジェクト作成＋デプロイ）
+gas-deploy init my-dashboard.html --title "ダッシュボード"
+
+# 更新（HTMLを変更したらpushするだけ）
+gas-deploy push my-dashboard.html
+
+# 登録済みアプリの一覧
+gas-deploy list
+
+# ブラウザで開く
+gas-deploy open my-dashboard.html
+```
+
+## 仕組み
 
 ```
 my-app.html
@@ -47,38 +63,38 @@ my-app.html
     ▼
 gas-deploy init
     │
-    ├── clasp create (Apps Script project)
-    ├── Generate Code.gs (doGet → HtmlService)
-    ├── Generate appsscript.json (webapp config)
-    ├── clasp push (upload files)
-    ├── clasp deploy (create web app)
-    └── Save config to .gas-deploy.json
+    ├── clasp create（Apps Scriptプロジェクト作成）
+    ├── Code.gs 生成（doGet → HtmlService）
+    ├── appsscript.json 生成（Webアプリ設定）
+    ├── clasp push（ファイルアップロード）
+    ├── clasp deploy（Webアプリ作成）
+    └── .gas-deploy.json に設定保存
     │
     ▼
-https://script.google.com/macros/s/.../exec  ← Your web app URL (fixed!)
+https://script.google.com/macros/s/.../exec  ← 固定URL
 ```
 
-On subsequent `gas-deploy push`, it updates the **same deployment ID**, so the URL never changes.
+以降の `gas-deploy push` は同じデプロイIDを更新するので、URLは変わらない。
 
-## Commands
+## コマンド一覧
 
-| Command | Description |
-|---------|-------------|
-| `gas-deploy init <file> --title "Name"` | Create project + first deploy |
-| `gas-deploy push <file>` | Update existing deployment |
-| `gas-deploy list` | Show all configured apps |
-| `gas-deploy open <file>` | Open the deployed URL in browser |
+| コマンド | 説明 |
+|---------|------|
+| `gas-deploy init <file> --title "名前"` | プロジェクト作成＋初回デプロイ |
+| `gas-deploy push <file>` | 既存デプロイを更新（URL固定） |
+| `gas-deploy list` | 登録済みアプリの一覧表示 |
+| `gas-deploy open <file>` | デプロイURLをブラウザで開く |
 
-### Options for `init`
+### `init` のオプション
 
-| Option | Default | Description |
-|--------|---------|-------------|
-| `--title "Name"` | filename | Title shown in browser tab |
-| `--access DOMAIN` | DOMAIN | `DOMAIN` = org only, `ANYONE_ANONYMOUS` = public |
+| オプション | デフォルト | 説明 |
+|-----------|----------|------|
+| `--title "名前"` | ファイル名 | ブラウザタブに表示されるタイトル |
+| `--access DOMAIN` | DOMAIN | `DOMAIN` = 組織内のみ、`ANYONE_ANONYMOUS` = 一般公開 |
 
-## Configuration
+## 設定ファイル
 
-`gas-deploy` stores config in `.gas-deploy.json` in your current directory:
+`gas-deploy` はカレントディレクトリの `.gas-deploy.json` に設定を保存する:
 
 ```json
 {
@@ -94,56 +110,55 @@ On subsequent `gas-deploy push`, it updates the **same deployment ID**, so the U
 }
 ```
 
-You can manage multiple HTML files in the same directory — each gets its own Apps Script project.
+1つのディレクトリで複数のHTMLファイルを管理できる。それぞれ独立したApps Scriptプロジェクトになる。
 
-## Usage with Claude Code
+## Claude Codeとの連携
 
-Combine `gas-deploy` with a build/sync script for automated deployments:
+ビルド/同期スクリプトと組み合わせて自動デプロイ:
 
 ```bash
 #!/bin/bash
 # sync_my_app.sh
 
-# Step 1: Your custom build/transform step
+# Step 1: データ加工
 python3 build_data.py > data.json
 python3 inject_data.py template.html data.json > my-app.html
 
-# Step 2: Deploy
+# Step 2: デプロイ
 gas-deploy push my-app.html
 ```
 
-In your `CLAUDE.md`:
+`CLAUDE.md` に記載しておけば、Claude Codeが自動でデプロイまで実行する:
+
 ```markdown
-## Deploy
-After modifying my-app.html, run:
-\`\`\`bash
+## デプロイ
+my-app.html を変更したら:
 bash sync_my_app.sh
-\`\`\`
 ```
 
-## Access Control
+## アクセス制御
 
-- **`DOMAIN`** (default): Only users in your Google Workspace organization can access
-- **`ANYONE_ANONYMOUS`**: Anyone with the URL can access (no login required)
+- **`DOMAIN`**（デフォルト）: Google Workspace組織内のユーザーのみアクセス可能
+- **`ANYONE_ANONYMOUS`**: URLを知っている人なら誰でもアクセス可能（ログイン不要）
 
-To change access after init, update the deployment in the Apps Script editor:
-1. Open `https://script.google.com/d/<script_id>/edit`
-2. Deploy → Manage deployments → Edit → Access
+init後にアクセス設定を変更するには:
+1. `https://script.google.com/d/<script_id>/edit` を開く
+2. デプロイ → デプロイを管理 → 編集 → アクセス
 
-## Troubleshooting
+## トラブルシューティング
 
 ### "User has not enabled the Apps Script API"
-→ Visit https://script.google.com/home/usersettings and toggle the API on
+→ https://script.google.com/home/usersettings でApps Script APIを有効にする
 
-### "clasp login" opens browser but nothing happens
-→ Make sure you're logged into the correct Google account in the browser
+### clasp loginでブラウザが開くが何も起きない
+→ 正しいGoogleアカウントでブラウザにログインしているか確認
 
-### "Deployed but can't access"
-→ The first deployment may need manual access configuration in the Apps Script editor (Deploy → Manage deployments → Edit access)
+### デプロイしたがアクセスできない
+→ 初回デプロイ後、Apps Scriptエディタでアクセス設定の手動変更が必要な場合がある（デプロイ → デプロイを管理 → アクセス編集）
 
-### Large HTML files (>50MB)
-→ Apps Script has a 50MB limit per file. Split your app or optimize assets.
+### 大きなHTMLファイル（50MB超）
+→ Apps Scriptには1ファイル50MBの制限がある。分割するかアセットを最適化する
 
-## License
+## ライセンス
 
 MIT

@@ -124,7 +124,8 @@ cmd_push() {
   echo -e "${BLUE}gas-deploy${NC} push ${GREEN}${html_file}${NC}"
 
   mkdir -p "$gas_dir"
-  [ -f "$gas_dir/.clasp.json" ] || echo "{\"scriptId\":\"$script_id\",\"rootDir\":\"$gas_dir\"}" > "$gas_dir/.clasp.json"
+  # .clasp.json は常に上書き（script_id変更時に古い値が残る問題を防止）
+  echo "{\"scriptId\":\"$script_id\",\"rootDir\":\"$gas_dir\"}" > "$gas_dir/.clasp.json"
   [ -f "$gas_dir/appsscript.json" ] || echo "{\"timeZone\":\"Asia/Tokyo\",\"dependencies\":{},\"webapp\":{\"executeAs\":\"USER_DEPLOYING\",\"access\":\"$access\"},\"exceptionLogging\":\"STACKDRIVER\",\"runtimeVersion\":\"V8\"}" > "$gas_dir/appsscript.json"
   [ -f "$gas_dir/Code.gs" ] || cat > "$gas_dir/Code.gs" << GSEOF
 function doGet() {

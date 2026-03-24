@@ -1,8 +1,8 @@
 #!/bin/bash
-# gas-deploy: Deploy any HTML file to Google Apps Script as a web app
+# gas-deploy: HTMLをApps ScriptのWebアプリとしてデプロイ
 set -e
 
-VERSION="1.1.0"
+VERSION="1.2.0"
 CONFIG_FILE="$(pwd)/.gas-deploy.json"
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'; BLUE='\033[0;34m'; NC='\033[0m'
@@ -27,7 +27,6 @@ import json, sys, os
 with open('$CONFIG_FILE') as f:
     data = json.load(f)
 apps = data.get('apps', {})
-# Try exact match first, then resolve to relative path
 key = '$html_file'
 app = apps.get(key)
 if not app:
@@ -39,6 +38,28 @@ if not app: sys.exit(1)
 for k, v in app.items():
     print(f\"{k}='{v}'\")
 " 2>/dev/null
+}
+
+# /tmp に一時的な clasp プロジェクトを作り、push/deploy して消す
+# .gas-deploy.json が唯一の設定源。/tmp には状態を持たない
+setup_gas_dir() {
+  local basename="$1" script_id="$2" access="$3" title="$4" html_src="$5"
+  local gas_dir="/tmp/gas-deploy-${basename}"
+
+  rm -rf "$gas_dir"
+  mkdir -p "$gas_dir"
+  echo "{\"scriptId\":\"$script_id\",\"rootDir\":\"$gas_dir\"}" > "$gas_dir/.clasp.json"
+  echo "{\"timeZone\":\"Asia/Tokyo\",\"dependencies\":{},\"webapp\":{\"executeAs\":\"USER_DEPLOYING\",\"access\":\"$access\"},\"exceptionLogging\":\"STACKDRIVER\",\"runtimeVersion\":\"V8\"}" > "$gas_dir/appsscript.json"
+  cat > "$gas_dir/Code.gs" << GSEOF
+function doGet() {
+  return HtmlService.createHtmlOutputFromFile('${basename}')
+    .setTitle('${title}')
+    .addMetaTag('viewport', 'width=device-width, initial-scale=1.0')
+    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+}
+GSEOF
+  cp "$html_src" "$gas_dir/${basename}.html"
+  echo "$gas_dir"
 }
 
 cmd_init() {
@@ -58,6 +79,7 @@ cmd_init() {
   check_env
 
   info "Creating Apps Script project..."
+  rm -rf "$gas_dir"
   mkdir -p "$gas_dir" && cd "$gas_dir"
   clasp create --title "$title" --type standalone 2>&1 | head -3
   local script_id=$(python3 -c "import json; print(json.load(open('.clasp.json'))['scriptId'])")
@@ -83,11 +105,13 @@ JEOF
   ok "Deployed: $deploy_id"
 
   cd "$orig_dir"
+  rm -rf "$gas_dir"
+
   python3 -c "
 import json, os
 f = '$CONFIG_FILE'
 data = json.load(open(f)) if os.path.exists(f) else {'apps':{}}
-data['apps']['$html_file'] = {'script_id':'$script_id','deploy_id':'$deploy_id','title':'$title','access':'$access','gas_dir':'$gas_dir'}
+data['apps']['$html_file'] = {'script_id':'$script_id','deploy_id':'$deploy_id','title':'$title','access':'$access'}
 json.dump(data, open(f,'w'), ensure_ascii=False, indent=2)
 "
   ok "Saved to .gas-deploy.json"
@@ -123,26 +147,15 @@ cmd_push() {
   local basename=$(basename "$html_file" .html)
   echo -e "${BLUE}gas-deploy${NC} push ${GREEN}${html_file}${NC}"
 
-  mkdir -p "$gas_dir"
-  # .clasp.json は常に上書き（script_id変更時に古い値が残る問題を防止）
-  echo "{\"scriptId\":\"$script_id\",\"rootDir\":\"$gas_dir\"}" > "$gas_dir/.clasp.json"
-  [ -f "$gas_dir/appsscript.json" ] || echo "{\"timeZone\":\"Asia/Tokyo\",\"dependencies\":{},\"webapp\":{\"executeAs\":\"USER_DEPLOYING\",\"access\":\"$access\"},\"exceptionLogging\":\"STACKDRIVER\",\"runtimeVersion\":\"V8\"}" > "$gas_dir/appsscript.json"
-  [ -f "$gas_dir/Code.gs" ] || cat > "$gas_dir/Code.gs" << GSEOF
-function doGet() {
-  return HtmlService.createHtmlOutputFromFile('${basename}')
-    .setTitle('${title}')
-    .addMetaTag('viewport', 'width=device-width, initial-scale=1.0')
-    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
-}
-GSEOF
+  local gas_dir=$(setup_gas_dir "$basename" "$script_id" "$access" "$title" "$html_file")
 
-  cp "$html_file" "$gas_dir/${basename}.html"
   cd "$gas_dir"
   info "Pushing..."
   clasp push --force 2>&1 | head -5
   info "Deploying..."
   clasp deploy --deploymentId "$deploy_id" --description "auto $(date +%Y%m%d-%H%M)" 2>&1 | head -3
   cd - > /dev/null
+  rm -rf "$gas_dir"
   echo ""
   ok "更新完了 → ${BLUE}https://script.google.com/macros/s/${deploy_id}/exec${NC}"
 }

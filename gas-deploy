@@ -1,0 +1,161 @@
+#!/bin/bash
+# gas-deploy: Deploy any HTML file to Google Apps Script as a web app
+set -e
+
+VERSION="1.0.0"
+CONFIG_FILE="$(pwd)/.gas-deploy.json"
+
+RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[0;33m'; BLUE='\033[0;34m'; NC='\033[0m'
+info()  { echo -e "${BLUE}→${NC} $1"; }
+ok()    { echo -e "${GREEN}✓${NC} $1"; }
+warn()  { echo -e "${YELLOW}!${NC} $1"; }
+err()   { echo -e "${RED}✗${NC} $1" >&2; }
+
+check_env() {
+  if ! command -v node &>/dev/null; then
+    if command -v brew &>/dev/null; then info "Installing Node.js..."; brew install node
+    else err "Please install Node.js: https://nodejs.org/"; exit 1; fi
+  fi
+  if ! command -v clasp &>/dev/null; then info "Installing clasp..."; npm install -g @google/clasp; fi
+  if [ ! -f "$HOME/.clasprc.json" ]; then warn "Not logged in"; clasp login; fi
+}
+
+get_app_config() {
+  local html_file="$1"
+  python3 -c "
+import json, sys
+with open('$CONFIG_FILE') as f:
+    data = json.load(f)
+app = data.get('apps', {}).get('$html_file')
+if not app: sys.exit(1)
+for k, v in app.items():
+    print(f\"{k}='{v}'\")
+" 2>/dev/null
+}
+
+cmd_init() {
+  local html_file="" title="" access="DOMAIN"
+  while [[ $# -gt 0 ]]; do
+    case $1 in --title) title="$2"; shift 2 ;; --access) access="$2"; shift 2 ;; -*) err "Unknown: $1"; exit 1 ;; *) html_file="$1"; shift ;; esac
+  done
+  [ -z "$html_file" ] && { err "Usage: gas-deploy init <html> --title \"Title\""; exit 1; }
+  [ ! -f "$html_file" ] && { err "Not found: $html_file"; exit 1; }
+  [ -z "$title" ] && title=$(basename "$html_file" .html)
+
+  local basename=$(basename "$html_file" .html)
+  local gas_dir="/tmp/gas-deploy-${basename}"
+  local orig_dir="$(pwd)"
+
+  echo -e "\n${BLUE}gas-deploy${NC} v${VERSION}\nInitializing ${GREEN}${html_file}${NC} as \"${title}\"\n"
+  check_env
+
+  info "Creating Apps Script project..."
+  mkdir -p "$gas_dir" && cd "$gas_dir"
+  clasp create --title "$title" --type standalone 2>&1 | head -3
+  local script_id=$(python3 -c "import json; print(json.load(open('.clasp.json'))['scriptId'])")
+  [ -z "$script_id" ] && { err "Failed"; exit 1; }
+  ok "Project: $script_id"
+
+  cat > Code.gs << GSEOF
+function doGet() {
+  return HtmlService.createHtmlOutputFromFile('${basename}')
+    .setTitle('${title}')
+    .addMetaTag('viewport', 'width=device-width, initial-scale=1.0')
+    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+}
+GSEOF
+  cat > appsscript.json << JEOF
+{"timeZone":"Asia/Tokyo","dependencies":{},"webapp":{"executeAs":"USER_DEPLOYING","access":"${access}"},"exceptionLogging":"STACKDRIVER","runtimeVersion":"V8"}
+JEOF
+
+  cp "${orig_dir}/${html_file}" "${basename}.html"
+  clasp push --force 2>&1 | head -5
+  local deploy_id=$(clasp deploy --description "v1" 2>&1 | grep -o 'AKfycb[a-zA-Z0-9_-]*')
+  [ -z "$deploy_id" ] && { err "Deploy failed"; exit 1; }
+  ok "Deployed: $deploy_id"
+
+  cd "$orig_dir"
+  python3 -c "
+import json, os
+f = '$CONFIG_FILE'
+data = json.load(open(f)) if os.path.exists(f) else {'apps':{}}
+data['apps']['$html_file'] = {'script_id':'$script_id','deploy_id':'$deploy_id','title':'$title','access':'$access','gas_dir':'$gas_dir'}
+json.dump(data, open(f,'w'), ensure_ascii=False, indent=2)
+"
+  ok "Saved to .gas-deploy.json"
+  echo -e "\n${GREEN}Done!${NC} URL: ${BLUE}https://script.google.com/macros/s/${deploy_id}/exec${NC}\n"
+}
+
+cmd_push() {
+  local html_file="$1"
+  [ -z "$html_file" ] && { err "Usage: gas-deploy push <html>"; exit 1; }
+  [ ! -f "$html_file" ] && { err "Not found: $html_file"; exit 1; }
+
+  local app_config=$(get_app_config "$html_file")
+  [ $? -ne 0 ] && { err "Not configured. Run: gas-deploy init $html_file"; exit 1; }
+  eval "$app_config"
+
+  local basename=$(basename "$html_file" .html)
+  echo -e "${BLUE}gas-deploy${NC} push ${GREEN}${html_file}${NC}"
+
+  mkdir -p "$gas_dir"
+  [ -f "$gas_dir/.clasp.json" ] || echo "{\"scriptId\":\"$script_id\",\"rootDir\":\"$gas_dir\"}" > "$gas_dir/.clasp.json"
+  [ -f "$gas_dir/appsscript.json" ] || echo "{\"timeZone\":\"Asia/Tokyo\",\"dependencies\":{},\"webapp\":{\"executeAs\":\"USER_DEPLOYING\",\"access\":\"$access\"},\"exceptionLogging\":\"STACKDRIVER\",\"runtimeVersion\":\"V8\"}" > "$gas_dir/appsscript.json"
+  [ -f "$gas_dir/Code.gs" ] || cat > "$gas_dir/Code.gs" << GSEOF
+function doGet() {
+  return HtmlService.createHtmlOutputFromFile('${basename}')
+    .setTitle('${title}')
+    .addMetaTag('viewport', 'width=device-width, initial-scale=1.0')
+    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+}
+GSEOF
+
+  cp "$html_file" "$gas_dir/${basename}.html"
+  cd "$gas_dir"
+  info "Pushing..."
+  clasp push --force 2>&1 | head -5
+  info "Deploying..."
+  clasp deploy --deploymentId "$deploy_id" --description "auto $(date +%Y%m%d-%H%M)" 2>&1 | head -3
+  cd - > /dev/null
+  ok "→ https://script.google.com/macros/s/${deploy_id}/exec"
+}
+
+cmd_list() {
+  [ ! -f "$CONFIG_FILE" ] && { info "No apps. Run: gas-deploy init"; exit 0; }
+  echo -e "${BLUE}gas-deploy${NC} apps:\n"
+  python3 -c "
+import json
+with open('$CONFIG_FILE') as f:
+    data = json.load(f)
+for name, app in data.get('apps', {}).items():
+    print(f'  {name}')
+    print(f'    Title: {app.get(\"title\",\"\")}')
+    print(f'    URL:   https://script.google.com/macros/s/{app.get(\"deploy_id\",\"\")}/exec')
+    print()
+"
+}
+
+cmd_open() {
+  local html_file="$1"
+  [ -z "$html_file" ] && { err "Usage: gas-deploy open <html>"; exit 1; }
+  local app_config=$(get_app_config "$html_file")
+  [ $? -ne 0 ] && { err "Not configured"; exit 1; }
+  eval "$app_config"
+  open "https://script.google.com/macros/s/${deploy_id}/exec" 2>/dev/null || echo "https://script.google.com/macros/s/${deploy_id}/exec"
+}
+
+case "${1:-}" in
+  init)  shift; cmd_init "$@" ;;
+  push)  shift; cmd_push "$@" ;;
+  list)  cmd_list ;;
+  open)  shift; cmd_open "$@" ;;
+  -v|--version) echo "gas-deploy v${VERSION}" ;;
+  *)
+    echo "gas-deploy v${VERSION} — Deploy HTML to Google Apps Script"
+    echo ""
+    echo "  gas-deploy init <html> --title \"Title\" [--access DOMAIN|ANYONE_ANONYMOUS]"
+    echo "  gas-deploy push <html>"
+    echo "  gas-deploy list"
+    echo "  gas-deploy open <html>"
+    ;;
+esac

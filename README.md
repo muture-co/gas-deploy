@@ -21,7 +21,7 @@ No need to touch the Apps Script editor. No need to manage deployment IDs. Just 
 
 ```bash
 # Install
-git clone https://github.com/<your-user>/gas-deploy.git ~/source/gas-deploy
+git clone https://github.com/muture-co/gas-deploy.git ~/source/gas-deploy
 mkdir -p ~/bin && ln -s ~/source/gas-deploy/gas-deploy ~/bin/gas-deploy
 
 # Make sure ~/bin is in your PATH (add to .zshrc if not already there)
